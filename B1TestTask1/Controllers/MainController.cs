@@ -9,8 +9,11 @@ namespace B1TestTask1.Controllers
 {
     public class MainController : Controller
     {
+        //Объявление всех использованных констант
         private const int RANGE_FOR_DATE_GENERATION = 5;
         private const int RANGE_FOR_NUMBER_GENERATION = 100000000;
+        private const int NUMBER_OF_FILES = 100;
+        private const int NUMBER_OF_LINES = 1000;
         private const string LATIN_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
         private const string CYRILLIC_CHARS = "АБВГДЕЁЖЗИКЛМНОПРСТУФХЦЧШЩЫЪЬЭЮЯабвгдеёжзиклмнопрстуфхцчшщыъьэюя";
         private const string NUMMERIC_CHARS = "0123456789";
@@ -18,6 +21,9 @@ namespace B1TestTask1.Controllers
         private const int LENGHT_OF_RANDOM_DECIMAL = 8;
         private const int MAX_INTEGER_PART_OF_DECIMAL = 19;
         private const int MIN_INTEGER_PART_OF_DECIMAL = 1;
+        private static int Added = 0;
+        private static int Left = 0;
+
         private readonly IWebHostEnvironment hostEnvironment;
 
         public MainController(IWebHostEnvironment hostEnvironment)
@@ -26,10 +32,12 @@ namespace B1TestTask1.Controllers
 
         }
 
-
+        
         public async Task<IActionResult> Index()
         {
+            //Получение медианы
             var median = GetMedian();
+            //Получение суммы
             var sum = GetSum();
             IndexViewModel indexViewModel = new IndexViewModel();
             indexViewModel.Median = await median;
@@ -37,12 +45,14 @@ namespace B1TestTask1.Controllers
             return await Task.Run(() => View(indexViewModel));
         }
 
+        //Метод получения медианы из БД
         private async Task<decimal> GetMedian()
         {
             
             return await Task.Run(() =>
             {
                 decimal decimalData = new decimal();
+                
                 string sqlExpression = $"SELECT AVG(DecimalData)" +
                 $" FROM(SELECT DecimalData" +
                 $" FROM TestTaskTable" +
@@ -62,7 +72,8 @@ namespace B1TestTask1.Controllers
                         {
                             while (reader.Read())
                             {
-                                decimalData = reader.GetDecimal(0);
+                                if(!reader.IsDBNull(0))
+                                    decimalData = reader.GetDecimal(0);
                             }
                         }
                     }
@@ -71,6 +82,7 @@ namespace B1TestTask1.Controllers
             });
         }
 
+        //Метод получения суммы из БД
         private async Task<long> GetSum()
         {
             return await Task.Run(() =>
@@ -91,7 +103,8 @@ namespace B1TestTask1.Controllers
                         {
                             while (reader.Read())
                             {
-                                longData = reader.GetInt64(0);
+                                if (!reader.IsDBNull(0))
+                                    longData = reader.GetInt64(0);
                             }
                         }
                     }
@@ -100,17 +113,22 @@ namespace B1TestTask1.Controllers
             });
 
         }
+
         //Генерация файлов
         public async Task<IActionResult> GenerateFiles()
         {
-            for (int fileNumber = 0; fileNumber < 100; fileNumber++)
+            //Для каждого создаваего файла
+            for (int fileNumber = 0; fileNumber < NUMBER_OF_FILES; fileNumber++)
             {
+                //Генерируем название и путь
                 string wwwRootPath = hostEnvironment.WebRootPath;
                 var fileName = $"file{fileNumber}.txt";
                 string path = Path.Combine(wwwRootPath + "/files/", fileName);
+                //Создаем и открываем файл
                 using (StreamWriter writer = new StreamWriter(path, false, System.Text.Encoding.Default))
                 {
-                    for (int lineNumber = 0; lineNumber < 1000; lineNumber++)
+                    //Генерируем и добавляем строки
+                    for (int lineNumber = 0; lineNumber < NUMBER_OF_LINES; lineNumber++)
                     {
                         var resultDate = GenerateDateString();
                         var resultLatinString =  GenerateLatinString();
@@ -175,6 +193,7 @@ namespace B1TestTask1.Controllers
         [HttpPost]
         public async Task<IActionResult> MergeFile(string param)
         {
+            //Проверяем, заполнен ли параметр
             if (String.IsNullOrEmpty(param)) param = "";
             int countOfDeletedStrings = 0;
             string wwwRootPath = hostEnvironment.WebRootPath;
@@ -204,7 +223,14 @@ namespace B1TestTask1.Controllers
                 }
             }
             ViewBag.CountOfDeletedStrings = countOfDeletedStrings;
-            return View("Index");
+            var median = GetMedian();
+            //Получение суммы
+            var sum = GetSum();
+            IndexViewModel indexViewModel = new IndexViewModel();
+            indexViewModel.Median = await median;
+            indexViewModel.Sum = await sum;
+            return await Task.Run(() => View("Index",indexViewModel));
+
         }
         //Импорт файлов в субд
         [HttpPost]
@@ -219,44 +245,56 @@ namespace B1TestTask1.Controllers
             {
                 await model.File.CopyToAsync(fileStream);
             }
+
+            List<string> records = new List<string>();
+
             using (StreamReader reader = new StreamReader(path))
             {
-                long numberOfLines = 0;
                 string? line;
                 while ((line = await reader.ReadLineAsync()) != null)
                 {
-
-                    var lineArray = line.Split("||");
-                    decimal decimalRecord = Convert.ToDecimal(lineArray[4]);
-                    long numericRecord = Convert.ToInt64(lineArray[3]);
-
-                    await Task.Run(() =>
-                    {
-                        using (var connection = new SqliteConnection("Data Source=Task.db"))
-                        {
-                            connection.Open();
-
-                            SqliteCommand command = new SqliteCommand();
-                            command.Connection = connection;
-                            command.CommandText = $"INSERT INTO TestTaskTable (Date, LatinString, CyrillicString, NumericData, DecimalData) " +
-                             $"VALUES (@Date, @LatinString, @CyrillicString, @NumericData, @DecimalData)";
-                            command.Parameters.AddWithValue("@Date", lineArray[0]);
-                            command.Parameters.AddWithValue("@LatinString", lineArray[1]);
-                            command.Parameters.AddWithValue("@CyrillicString", lineArray[2]);
-                            command.Parameters.AddWithValue("@NumericData", numericRecord);
-                            command.Parameters.AddWithValue("@DecimalData", decimalRecord);
-                            command.ExecuteNonQuery();
-                        }
-                    });
-                    
-                    //TODO Вывод количества записанных и оставшихкся строк
-                    //await dataContext.SaveChangesAsync();
+                    records.Add(line);
                 }
             }
 
-            return View("Index");
+            Left = records.Count;
+            foreach (var record in records)
+            {
+                var lineArray = record.Split("||");
+                decimal decimalRecord = Convert.ToDecimal(lineArray[4]);
+                long numericRecord = Convert.ToInt64(lineArray[3]);
+
+                await Task.Run(() =>
+                {
+                    using (var connection = new SqliteConnection("Data Source=Task.db"))
+                    {
+                        connection.Open();
+
+                        SqliteCommand command = new SqliteCommand();
+                        command.Connection = connection;
+                        command.CommandText = $"INSERT INTO TestTaskTable (Date, LatinString, CyrillicString, NumericData, DecimalData) " +
+                         $"VALUES (@Date, @LatinString, @CyrillicString, @NumericData, @DecimalData)";
+                        command.Parameters.AddWithValue("@Date", lineArray[0]);
+                        command.Parameters.AddWithValue("@LatinString", lineArray[1]);
+                        command.Parameters.AddWithValue("@CyrillicString", lineArray[2]);
+                        command.Parameters.AddWithValue("@NumericData", numericRecord);
+                        command.Parameters.AddWithValue("@DecimalData", decimalRecord);
+                        command.ExecuteNonQuery();
+                        Left--;
+                        Added++;
+                    }
+                });
+            }
+            Left = 0;
+            Added = 0;
+            return RedirectToAction("Index");
         }
 
+        [HttpGet]
+        public JsonResult GetProcess()
+        {
+            return new JsonResult(Ok(new {Added = Added, Left = Left}));
+        }
 
     }
 }
